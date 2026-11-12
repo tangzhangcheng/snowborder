@@ -12,6 +12,8 @@ const MIN_CLEARANCE = 1.3;
 const LOOK_SENSITIVITY = 0.005;
 /** 镜头仰角（从水平面往上量）的上下限，免得钻进雪里或翻过头顶。 */
 const ELEVATION = [-0.1, 1.35];
+/** 镜头压到最低后继续往上拖，最多还能抬头多少弧度：加上半个视野，正好够看到头顶。 */
+const SKY_TILT = 1.25;
 /** 松开右键后视角回到身后的快慢。 */
 const LOOK_RETURN = 4;
 /** 视角转开多少弧度后，镜头就完全盯着人看而不是看前方的路。 */
@@ -39,13 +41,22 @@ export class RideCamera {
     this.looking = on;
   }
 
-  /** 右键拖动：鼠标往右，视角往右转；鼠标往下，镜头升高俯视。 */
+  /**
+   * 右键拖动：鼠标往右，视角往右转；鼠标往下，镜头升高俯视；
+   * 鼠标往上，镜头先压低，压到底以后再往上拖就是抬头看天。
+   */
   pan(dx, dy) {
     if (!this.looking) return;
     this.lookYaw = wrapAngle(this.lookYaw - dx * LOOK_SENSITIVITY);
-    // 夹在仰角上下限以内，拖到头再往回拖时马上有反应
+    // 夹在上下限以内，拖到头再往回拖时马上有反应
     const base = Math.atan2(this.height, this.dist);
-    this.lookPitch = THREE.MathUtils.clamp(this.lookPitch + dy * LOOK_SENSITIVITY, ELEVATION[0] - base, ELEVATION[1] - base);
+    this.lookPitch = THREE.MathUtils.clamp(this.lookPitch + dy * LOOK_SENSITIVITY, ELEVATION[0] - SKY_TILT - base, ELEVATION[1] - base);
+  }
+
+  /** 镜头已经压到最低、还继续往上拖的那一段，变成抬头的角度（弧度）。 */
+  skyTilt() {
+    const below = ELEVATION[0] - (Math.atan2(this.height, this.dist) + this.lookPitch);
+    return THREE.MathUtils.clamp(below, 0, SKY_TILT);
   }
 
   update(motor, dt) {
@@ -100,6 +111,7 @@ export class RideCamera {
 
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.look);
+    this.camera.rotateX(this.skyTilt());
     // 压刃时镜头跟着轻轻侧倾
     this.roll = THREE.MathUtils.lerp(this.roll, motor.mode === 'ride' ? -motor.edge * 0.07 : 0, k(5));
     this.camera.rotateZ(this.roll);

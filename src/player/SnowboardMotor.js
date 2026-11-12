@@ -5,6 +5,8 @@ const G = 9.81;
 const HOVER = 0.05;
 /** 刹车时板子整个横过来的角度（弧度）。 */
 const BRAKE_SKID = 1.25;
+/** 刹车把速度压到这个以下（米/秒）就算刹停了。 */
+const PARK_SPEED = 0.6;
 /** 蓄力跳按满要多少秒。 */
 export const MAX_CHARGE = 0.7;
 /** 松开跳跃键到板子离地要多少秒：这段时间腿在蹬伸，人还踩在雪上，蹬到头才离地。 */
@@ -118,6 +120,9 @@ export class SnowboardMotor {
     this.edge = 0;
     this.skid = 0;
     this.switch = false;
+    // 刹停：parked 表示正横着板站在原地；parkArmed 表示停下以后方向键松开过
+    this.parked = false;
+    this.parkArmed = false;
     this.charge = 0;
     // 蹬伸：popPower 大于 0 表示正在蹬（数值是蓄了几成力），popTime 是已经蹬了多久
     this.popPower = 0;
@@ -154,10 +159,11 @@ export class SnowboardMotor {
   }
 
   step(input, dt) {
-    // 下过板再踩上去，总是正脚，蹬到一半的起跳也作废
+    // 下过板再踩上去，总是正脚，蹬到一半的起跳、刹停的状态也作废
     if (this.mode !== 'ride') {
       this.switch = false;
       this.popPower = 0;
+      this.parked = false;
     }
     if (this.mode === 'lift' || this.mode === 'drive') return;
     if (this.wipeout > 0) this.wipeout = Math.max(0, this.wipeout - dt);
@@ -244,6 +250,7 @@ export class SnowboardMotor {
   takeOff(thrown = 0) {
     this.y += 0.06;
     this.onGround = false;
+    this.parked = false;
     this.airTime = 0;
     this.airSpin = 0;
     this.popPower = 0;
@@ -389,6 +396,10 @@ export class SnowboardMotor {
     const speed = vel.length();
     const edgeAbs = Math.abs(this.edge);
     const braking = input.brake && !down;
+    if (this.updatePark(input, braking, speed)) {
+      this.stayParked(sample, dt);
+      return;
+    }
 
     // 正贴着树或墙：原地拧板只会在原地打转，这时交给滚落线把板头带开
     const pinned = Boolean(this.contact);
@@ -459,13 +470,63 @@ export class SnowboardMotor {
   }
 
   /**
+   * 刹停：刹车把速度压没了以后就横着板站在原地，重力不会再把人带走，
+   * 直到玩家重新给出起步的操作——收腿蹬板、起跳，或者压刃把板头拧下去。
+   * 刹车时一直压着的方向键不算起步，得松开再按：不然先松刹车、后松方向键的那一瞬间又滑出去了。
+   * 返回这一步是不是停着。
+   */
+  updatePark(input, braking, speed) {
+    if (!this.parked) {
+      if (!braking || speed > PARK_SPEED) return false;
+      this.parked = true;
+      this.parkArmed = false;
+    }
+    if (!input.edge) this.parkArmed = true;
+    const go = input.tuck || input.jump || (input.edge && this.parkArmed);
+    if (go && !input.brake) this.parked = false;
+    return this.parked;
+  }
+
+  /** 刹停时的一步：速度清零，板子保持横着，并慢慢摆到横对着坡。 */
+  stayParked(sample, dt) {
+    this.vx = 0;
+    this.vy = 0;
+    this.vz = 0;
+    this.yawRate = 0;
+    this.slip = 0;
+    this.yaw = wrap(this.yaw + this.acrossSlopeRate(sample.normal) * dt);
+    this.skid += (this.skidTarget(true, false, 0) - this.skid) * (1 - Math.exp(-SKID_RATE * dt));
+    this.y = sample.height + HOVER;
+  }
+
+  /**
+   * 刹停在坡上时把板子摆到横对着坡的角速度（弧度/秒）：
+   * 斜着切坡时刹停，板头可能正朝着山下，停在那儿却不往下滑看着是假的。
+   */
+  acrossSlopeRate(normal) {
+    const steep = smooth(FALL_LINE_SLOPE[0], FALL_LINE_SLOPE[1], Math.hypot(normal.x, normal.z));
+    if (steep <= 0) return 0;
+    // 横对着坡有两个朝向，取离板子现在近的那个
+    let off = wrap(Math.atan2(normal.x, normal.z) + Math.PI / 2 - (this.yaw + this.skid));
+    if (Math.abs(off) > Math.PI / 2) off = wrap(off + Math.PI);
+    return THREE.MathUtils.clamp(off * 3, -FALL_LINE_RATE, FALL_LINE_RATE) * steep;
+  }
+
+  /** 刹车时板头往哪边横：停住以后不再换边，滑着的时候跟着压刃的方向。 */
+  brakeSide() {
+    if (this.parked && this.skid !== 0) return Math.sign(this.skid);
+    return this.edge < -0.05 ? -1 : 1;
+  }
+
+  /**
    * 板子该横过来多少（弧度，和 yaw 同向为正）。只是板头相对行进方向的偏角，不改行进方向：
-   * 刹车时整个横过来；搓雪转弯的风格里，转弯时板头比行进方向多拧进弯里一点；
+   * 刹车时整个横过来，刹停了也一直横着；搓雪转弯的风格里，转弯时板头比行进方向多拧进弯里一点；
    * 都不是的话是 0，雪面的摩擦会把板子拧回行进方向。
    */
   skidTarget(braking, down, speed) {
-    if (down || speed <= 1.5) return 0;
-    if (braking) return (this.edge < -0.05 ? -1 : 1) * BRAKE_SKID;
+    if (down) return 0;
+    if (braking) return this.brakeSide() * BRAKE_SKID;
+    if (speed <= 1.5) return 0;
     const feel = this.feel;
     if (!feel.steerSkid) return 0;
     // edge 为正是向右转，对应 yaw 减小，所以板头拧进弯里是负的

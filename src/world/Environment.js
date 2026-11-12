@@ -19,6 +19,11 @@ const MOON_PEAK = 0.6;
 const SWITCH_HEIGHT = -0.08;
 /** 主光再低也按这个高度打，不然日出日落时整座山都在背光里。 */
 const MIN_KEY_HEIGHT = 0.25;
+/** 雪场的纬度（弧度）：北天极在正北、仰角等于纬度的地方，星空绕着它一天转一圈。 */
+const LATITUDE = THREE.MathUtils.degToRad(48);
+const STAR_AXIS = new THREE.Vector3(0, 0, 1);
+/** 把北天极（世界里 -z 是北）摆到星空坐标系的 z 轴上。 */
+const POLE_TO_AXIS = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, Math.sin(LATITUDE), -Math.cos(LATITUDE)), STAR_AXIS);
 const LIGHT_DISTANCE = 100;
 const DAY_FILL_POWER = 1.15;
 const DEFAULT_HAZE = [1200, 18000];
@@ -44,6 +49,8 @@ export class Environment {
     this.keyDir = new THREE.Vector3();
     this.grey = new THREE.Color();
     this.tint = new THREE.Color();
+    this.starSpin = new THREE.Quaternion();
+    this.starTurn = new THREE.Matrix4();
     this.unlit = [];
 
     this.key = new THREE.DirectionalLight('#ffffff', 1);
@@ -151,6 +158,13 @@ export class Environment {
     skyUniforms.uCover.value = this.weather.now.cover;
     skyUniforms.uStars.value = look.stars;
     skyUniforms.uGlow.value = look.glow;
+    this.turnStars();
+  }
+
+  /** 星空跟着钟点绕北天极转：和太阳一样东升西落，一天一圈。 */
+  turnStars() {
+    this.starSpin.setFromAxisAngle(STAR_AXIS, (this.hour / 24) * Math.PI * 2).multiply(POLE_TO_AXIS);
+    skyUniforms.uSkyTurn.value.setFromMatrix4(this.starTurn.makeRotationFromQuaternion(this.starSpin));
   }
 
   /** 配色表里存的是显示色，交给 three 的灯和雾之前要转回线性空间。 */

@@ -474,6 +474,8 @@ export class Game {
     if (car) return key('E', `开${car.spec.name}`);
     const lift = this.lifts.nearestBottom(motor.x, motor.z);
     if (lift) return key('E', `乘坐${lift.name}`);
+    // 刹停以后不会自己滑走，提醒一下怎么再出发
+    if (motor.parked) return key('W', '起步');
     return '';
   }
 

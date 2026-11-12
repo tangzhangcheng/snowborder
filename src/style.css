@@ -201,7 +201,8 @@ body[data-view="diorama"] #hud { display: none; }
 #prompt {
   position: fixed;
   left: 50%;
-  bottom: 7vh;
+  /* 窗口窄的时候左下角那排数据卡片会伸到中间来，提示要浮在它们上面 */
+  bottom: max(7vh, 96px);
   transform: translateX(-50%);
   z-index: 5;
   padding: 8px 18px;

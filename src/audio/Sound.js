@@ -14,8 +14,20 @@ const GLIDE = {
   powder: { gain: 0.24, frequency: 650 },
   crust: { gain: 0.36, frequency: 2600 },
 };
-/** 风声：天气的风最大时、滑到最快时各自的音量。 */
-const WIND_GAIN = { base: 0.03, gust: 0.3, speed: 0.9 };
+/**
+ * 风声分两层，音色都和板底的沙沙声错开，才不会被它盖住：
+ * body 是耳边呼呼的一大片低频，howl 是窄窄一条、音高飘来飘去的呼啸。
+ * base：没风站着不动时的底噪；gust：天气的风最大时加多少；speed：滑到最快时加多少；
+ * tone：音色从慢到快滑过的频率（赫兹）；wander：呼啸的音高上下飘多少赫兹。
+ */
+const WIND = {
+  body: { base: 0.05, gust: 0.3, speed: 1.45, tone: [320, 1000] },
+  howl: { base: 0, gust: 0.3, speed: 1.3, tone: [620, 1150], wander: 180 },
+};
+/** 风声随速度涨的指数：越大越要冲到很快才听得见，取小一点让中等速度也有风。 */
+const RUSH_CURVE = 1.3;
+/** 风是一阵一阵的：音量按这个幅度起伏。 */
+const FLUTTER = 0.28;
 const RUSHING_MODES = ['ride', 'drive'];
 /** 板刃刮雪声：压刃、搓雪各自的音量系数，以及总的上限。 */
 const EDGE_GAIN = { carve: 0.26, slip: 0.02, max: 0.24 };
@@ -76,6 +88,7 @@ export class Sound {
     this.muted = localStorage.getItem(MUTE_KEY) === '1';
     this.last = {};
     this.stride = 0;
+    this.clock = 0;
   }
 
   /** 浏览器要等用户点过或按过键才允许出声，所以第一次操作时才真正建起来。 */
@@ -99,7 +112,8 @@ export class Sound {
   buildLayers() {
     const { ctx, master, noise } = this;
     return {
-      wind: noiseLayer(ctx, master, noise, { type: 'bandpass', frequency: 400, q: 0.5 }),
+      wind: noiseLayer(ctx, master, noise, { type: 'lowpass', frequency: WIND.body.tone[0] }),
+      howl: noiseLayer(ctx, master, noise, { type: 'bandpass', frequency: WIND.howl.tone[0], q: 4 }),
       glide: noiseLayer(ctx, master, noise, { type: 'bandpass', frequency: 1900, q: 0.8 }),
       edge: noiseLayer(ctx, master, noise, { type: 'highpass', frequency: 2400 }),
       lift: humLayer(ctx, master, { frequency: 58, cutoff: 220 }),
@@ -120,8 +134,9 @@ export class Sound {
    */
   update(dt, state) {
     if (!this.ctx) return;
+    this.clock += dt;
     const now = this.ctx.currentTime;
-    for (const [name, level] of Object.entries(levels(state))) {
+    for (const [name, level] of Object.entries(levels(state, this.clock))) {
       this.layers[name].gain.setTargetAtTime(level.gain, now, SMOOTH);
       this.layers[name].tone.setTargetAtTime(level.tone, now, SMOOTH);
     }
@@ -155,16 +170,35 @@ export class Sound {
   }
 }
 
+/** 阵风的起伏：几个互不成倍数的慢波叠起来，听不出重复。返回 -1 ~ 1。 */
+function sway(clock, pace) {
+  const t = clock * pace;
+  return (Math.sin(t) + 0.6 * Math.sin(t * 2.3 + 1.7) + 0.3 * Math.sin(t * 5.1 + 0.4)) / 1.9;
+}
+
+/** 风的一层此刻的音量和音色。rush：迎面的风有多大（0~1）；swell：此刻阵风的起伏（-1~1）。 */
+function windLayer({ base, gust, speed, tone }, state, rush, swell) {
+  const force = state.gust ** 2 * gust + rush ** RUSH_CURVE * speed;
+  return {
+    gain: base + force * (1 + FLUTTER * swell),
+    tone: tone[0] + (tone[1] - tone[0]) * Math.max(rush, state.gust * 0.5),
+  };
+}
+
 /** 各层底噪此刻该多响（gain）、音色多高（tone，赫兹）。 */
-function levels(state) {
+function levels(state, clock) {
   const fast = Math.min(1, state.speed / TOP_SPEED);
   const grounded = state.active && state.mode === 'ride' && state.onGround;
   const surface = GLIDE[state.surface] ?? GLIDE.groomed;
   // 索道为了省时间跑得飞快，坐在上面不该听到狂风，所以只有自己滑、自己开车时才算迎面的风
   const rush = state.active && RUSHING_MODES.includes(state.mode) ? fast : 0;
+  // 风：天气本身的风一直有，滑得越快耳边的风越大；两层的起伏各走各的节奏
+  const wind = windLayer(WIND.body, state, rush, sway(clock, 0.9));
+  const howl = windLayer(WIND.howl, state, rush, sway(clock + 40, 1.4));
+  howl.tone += WIND.howl.wander * sway(clock + 90, 0.6);
   return {
-    // 风：天气本身的风一直有，滑得越快耳边的风越大
-    wind: { gain: WIND_GAIN.base + state.gust ** 2 * WIND_GAIN.gust + rush ** 2 * WIND_GAIN.speed, tone: 320 + rush * 700 + state.gust * 250 },
+    wind,
+    howl,
     glide: { gain: grounded ? Math.min(1, state.speed / 12) * surface.gain : 0, tone: surface.frequency },
     // 板刃：压刃越深、搓雪越狠，刮擦声越大
     edge: { gain: grounded ? Math.min(EDGE_GAIN.max, Math.abs(state.edge) * fast * EDGE_GAIN.carve + state.slip * EDGE_GAIN.slip) : 0, tone: 2400 + fast * 1600 },
