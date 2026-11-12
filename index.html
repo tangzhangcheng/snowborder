@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>山谷雪场</title>
+  </head>
+  <body>
+    <div id="loading">正在铺雪…</div>
+
+    <div id="hud">
+      <div id="run-tag">
+        <span id="run-badge" class="badge"></span>
+        <div>
+          <b id="run-name">野外</b>
+          <small id="run-sub">粉雪</small>
+        </div>
+      </div>
+      <div id="gps"></div>
+
+      <nav id="rail" aria-label="菜单">
+        <button id="rail-map" type="button" title="地图 (M)" aria-label="地图">
+          <svg viewBox="0 0 24 24"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z" /><path d="M9 4v13.5M15 6.5V20" /></svg>
+        </button>
+        <button id="rail-diorama" type="button" title="沙盘 (B)" aria-label="沙盘">
+          <svg viewBox="0 0 24 24"><path d="m3 18 6-10 4 6 2.5-3.5L21 18z" /><path d="M3 21h18" /></svg>
+        </button>
+        <button id="rail-reset" type="button" title="回到起点 (R)" aria-label="回到起点">
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9" /><path d="M4 4v5h5" /></svg>
+        </button>
+        <button id="rail-gear" type="button" title="装备" aria-label="装备">
+          <svg viewBox="0 0 24 24"><rect x="9" y="2.5" width="6" height="19" rx="3" /><path d="M9 8h6M9 16h6" /></svg>
+        </button>
+        <button id="rail-sound" type="button" title="声音" aria-label="声音">
+          <svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z" /><path class="waves" d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" /><path class="cross" d="m16 9.5 5 5m0-5-5 5" /></svg>
+        </button>
+        <button id="rail-help" type="button" title="操作说明" aria-label="操作说明">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8" /><path d="M12 17h.01" /></svg>
+        </button>
+      </nav>
+
+      <div id="stats">
+        <div class="card"><span>速度</span><b id="speed">0</b><small>km/h</small></div>
+        <div class="card"><span>用时</span><b id="time">0:00</b><small>本趟</small></div>
+        <div class="card"><span>海拔</span><b id="alt">0</b><small>m</small></div>
+        <div class="card"><span>时刻</span><b id="clock">10:00</b><small id="weather">晴</small></div>
+      </div>
+
+      <div id="minimap-wrap" title="打开地图 (M)">
+        <canvas id="minimap" width="352" height="352"></canvas>
+        <span class="north">N</span>
+      </div>
+
+      <div id="charge"><i></i></div>
+      <div id="prompt"></div>
+      <div id="toast"></div>
+    </div>
+
+    <aside id="workshop" class="panel">
+      <header>
+        <h2>装备</h2>
+        <button id="workshop-close" type="button" class="ghost" aria-label="关闭">×</button>
+      </header>
+      <label>图案<select id="pattern"></select></label>
+      <label>板面<input id="color-top" type="color" /></label>
+      <label>板底<input id="color-base" type="color" /></label>
+      <label>点缀<input id="color-accent" type="color" /></label>
+      <label>固定器<input id="color-binding" type="color" /></label>
+      <label>上衣<input id="outfit-jacket" type="color" value="#2fb3c2" /></label>
+      <label class="check"><input id="outfit-helmet" type="checkbox" checked />头盔</label>
+      <label class="check"><input id="outfit-goggles" type="checkbox" checked />雪镜</label>
+      <div class="row">
+        <button id="export-gear" type="button">保存定制</button>
+        <button id="gear-default" type="button">默认</button>
+      </div>
+      <label class="file">导入 JSON<input id="import-gear" type="file" accept="application/json" /></label>
+    </aside>
+
+    <div id="title">
+      <p class="eyebrow">阿勒泰 · 自由滑行</p>
+      <h1>山谷雪场</h1>
+      <p class="lead">从山顶一路滑到谷底，坐索道回来，再换一条道。</p>
+      <button id="begin" type="button">开始</button>
+    </div>
+
+    <div id="intro" class="panel">
+      <h2>怎么滑</h2>
+      <ul class="keys">
+        <li><kbd>A</kbd><kbd>D</kbd><span>压刃转弯</span></li>
+        <li><kbd>W</kbd><span>收腿加速，平地蹬板</span></li>
+        <li><kbd>S</kbd><span>横板搓雪减速</span></li>
+        <li><kbd>空格</kbd><span>按住蓄力，松开起跳；压着 A / D 起跳带转体，空中按住收紧转得更快，松开张开减速</span></li>
+        <li><kbd>E</kbd><span>乘索道、上下车</span></li>
+        <li><kbd>M</kbd><span>地图，点一下设目的地</span></li>
+        <li><kbd>F</kbd><span>脱板步行</span></li>
+        <li><kbd>R</kbd><span>回到山顶</span></li>
+        <li><kbd>右键</kbd><span>按住拖动转视角，松开回正</span></li>
+        <li><kbd>T</kbd><span>把时间往后拨三小时</span></li>
+        <li><kbd>Y</kbd><span>换天气：晴、多云、小雪、暴雪</span></li>
+      </ul>
+      <button id="drop-in" type="button">出发</button>
+    </div>
+
+    <div id="map-modal">
+      <div class="map-card">
+        <header>
+          <strong>雪场地图</strong>
+          <ul id="map-legend"></ul>
+          <button id="map-close" type="button" class="ghost" aria-label="关闭">×</button>
+        </header>
+        <div class="map-stage">
+          <canvas id="map-canvas"></canvas>
+          <div class="map-zoom">
+            <button id="zoom-in" type="button" aria-label="放大">+</button>
+            <button id="zoom-out" type="button" aria-label="缩小">−</button>
+          </div>
+        </div>
+        <footer>
+          <p id="map-info">点一下地图上的位置设为目的地，滚轮缩放，拖动平移。</p>
+          <button id="map-clear" type="button" disabled>清除目的地</button>
+          <button id="open-diorama" type="button">沙盘</button>
+        </footer>
+        <p class="credit" id="map-credit"></p>
+      </div>
+    </div>
+
+    <button id="diorama-back" type="button">回到滑行</button>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
