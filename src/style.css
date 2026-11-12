@@ -164,6 +164,8 @@ body[data-view="diorama"] #hud { display: none; }
 .card span { display: block; font-size: 12px; color: var(--ink-soft); }
 .card b { font-size: 28px; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .card small { margin-left: 4px; font-size: 12px; color: var(--ink-soft); }
+/* 卡片里放的是字不是数：小一号，行高补齐到和数字一样高 */
+.card b.words { display: block; font-size: 19px; line-height: 32px; }
 
 #minimap-wrap {
   position: fixed;
@@ -265,6 +267,7 @@ body[data-view="diorama"] #hud { display: none; }
 #workshop label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; font-size: 14px; }
 #workshop select { border: 1.5px solid var(--line); border-radius: 8px; padding: 3px 6px; background: #fff; }
 #workshop input[type="color"] { width: 44px; height: 26px; padding: 0; border: 1.5px solid var(--line); border-radius: 8px; background: none; }
+#workshop .note { margin: -2px 0 10px; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
 #workshop .check { justify-content: flex-start; }
 #workshop .row { display: flex; gap: 8px; margin-top: 10px; }
 #workshop .row button { flex: 1; padding: 0.4rem 0; font-size: 13px; }

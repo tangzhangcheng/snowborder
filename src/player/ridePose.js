@@ -16,6 +16,7 @@ const PITCH_RANGE = [-0.3, 0.95];
  * - twist  上身朝板头方向转开的角度
  * - look   头朝板头方向转过去的角度
  * - knees  膝盖往外打开的程度
+ * - drive  两个膝盖一起往板头方向顶的程度（一顺站位用）
  * - front / back  前手、后手相对各自肩膀的位置
  */
 const STANCE = {
@@ -24,6 +25,7 @@ const STANCE = {
   twist: 0.08,
   look: 1.2,
   knees: 0.8,
+  drive: 0,
   front: [0.17, -0.27, 0.08],
   back: [-0.17, -0.27, 0.06],
 };
@@ -60,18 +62,31 @@ const MOVES = {
   spinTuck: { drop: 0.05, pitch: 0.14, front: [0.05, -0.15, 0.17], back: [-0.05, -0.15, 0.17] },
 };
 
-const SCALARS = ['hipZ', 'pitch', 'twist', 'look', 'knees'];
+const SCALARS = ['hipZ', 'pitch', 'twist', 'look', 'knees', 'drive'];
+
+/**
+ * 一种滑行风格用的整套姿态：基础站姿和各个动作，换上这种风格改掉的部分。
+ * 动作是整个换掉的（写了 toe 就用它的 toe，不和基础的 toe 混），站姿是逐项改的。
+ * @param {{ stance?: object, moves?: object }} variant 风格里的 pose；不传就是基础的那一套
+ */
+export function poseSet(variant = {}) {
+  return { stance: { ...STANCE, ...variant.stance }, moves: { ...MOVES, ...variant.moves } };
+}
+
+const BASE_SET = poseSet();
 
 /**
  * 板上的姿态。
  * @param {Record<keyof typeof MOVES, number>} amounts 每个动作做到几成（0–1），缺省为 0
- * @returns {{ hipY: number, hipZ: number, pitch: number, twist: number, look: number, knees: number, front: THREE.Vector3, back: THREE.Vector3 }}
+ * @param {ReturnType<typeof poseSet>} set 用哪一套姿态，缺省是基础的八字站姿
+ * @returns {{ hipY: number, hipZ: number, pitch: number, twist: number, look: number, knees: number, drive: number, front: THREE.Vector3, back: THREE.Vector3 }}
  */
-export function ridePose(amounts) {
-  const pose = { ...STANCE, front: new THREE.Vector3(...STANCE.front), back: new THREE.Vector3(...STANCE.back) };
+export function ridePose(amounts, set = BASE_SET) {
+  const { stance, moves } = set;
+  const pose = { ...stance, front: new THREE.Vector3(...stance.front), back: new THREE.Vector3(...stance.back) };
   const reach = new THREE.Vector3();
   let drop = 0;
-  for (const [name, move] of Object.entries(MOVES)) {
+  for (const [name, move] of Object.entries(moves)) {
     const amount = THREE.MathUtils.clamp(amounts[name] ?? 0, 0, 1);
     if (amount <= 0) continue;
     drop += (move.drop ?? 0) * amount;

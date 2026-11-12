@@ -1,10 +1,10 @@
 import * as THREE from 'three';
+import { DEFAULT_TECHNIQUE, TECHNIQUES } from './techniques.js';
 
 const G = 9.81;
 const HOVER = 0.05;
-export const MAX_EDGE = 1.1;
-const SIDECUT = 7.5;
-const EDGE_RESPONSE = 6.5;
+/** 刹车时板子整个横过来的角度（弧度）。 */
+const BRAKE_SKID = 1.25;
 /** 蓄力跳按满要多少秒。 */
 export const MAX_CHARGE = 0.7;
 /** 松开跳跃键到板子离地要多少秒：这段时间腿在蹬伸，人还踩在雪上，蹬到头才离地。 */
@@ -33,8 +33,6 @@ const SCRUB_DECEL = 7.5;
 const SKID_RATE = 9;
 /** 落地时垂直雪面的速度超过这个（米/秒）腿就吃不住，直接摔。 */
 const HARD_LANDING = 11;
-/** 落地时板子和行进方向的夹角（弧度）：小于 clean 算站稳了；大于 catch 而且够快，板刃卡进雪里把人掀翻。 */
-const LANDING_SKEW = { clean: 0.45, catch: 0.85 };
 /**
  * 找落点：转体快落地时，下身带着板子提前拧向落地那一刻离得最近的顺向（正脚或反脚），和反拧是同一个动作。
  * seconds 是离落地多久开始拧，angle 是最多能拧多少弧度——差得比这还多就只能横着落了。
@@ -84,6 +82,7 @@ function smooth(a, b, x) {
  * 运动学单板。
  * yaw 是板子的走向：前进方向 = (sin yaw, cos yaw)；yaw 减小 = 向右转。
  * 板头实际指向哪里看 heading：横滑时偏开一个 skid 角，反脚（switch）时板尾朝前。
+ * 立刃多深、咬得多死、跳得多高这些手感跟着滑行风格走，见 techniques.js。
  * input: { edge(-1 左..1 右), tuck, brake, jump(按住), turn, forward, run }
  */
 export class SnowboardMotor {
@@ -94,7 +93,18 @@ export class SnowboardMotor {
     this.spawn = { ...spawn };
     this.inset = inset;
     this.events = [];
+    this.feel = TECHNIQUES[DEFAULT_TECHNIQUE].motor;
     this.reset(spawn);
+  }
+
+  /** 换一种滑行风格的手感（TECHNIQUES 里某一项的 motor）。 */
+  setFeel(feel) {
+    this.feel = feel;
+  }
+
+  /** 这种风格立刃最深到多少弧度。 */
+  get maxEdge() {
+    return this.feel.maxEdge;
   }
 
   reset(spawn = this.spawn) {
@@ -158,8 +168,8 @@ export class SnowboardMotor {
     }
     const down = this.wipeout > 0;
     this.tucking = Boolean(input.tuck) && !input.brake && !down;
-    const target = (down ? 0 : input.edge) * MAX_EDGE;
-    this.edge += (target - this.edge) * (1 - Math.exp(-EDGE_RESPONSE * dt));
+    const target = (down ? 0 : input.edge) * this.feel.maxEdge;
+    this.edge += (target - this.edge) * (1 - Math.exp(-this.feel.edgeResponse * dt));
 
     if (this.onGround) this.stepJump(input, dt, down);
     if (this.onGround) this.stepGround(input, dt);
@@ -222,11 +232,11 @@ export class SnowboardMotor {
    */
   launch(power, turn) {
     const n = this.terrain.sample(this.x, this.z).normal;
-    const pop = THREE.MathUtils.lerp(POP_SPEED[0], POP_SPEED[1], power);
+    const pop = THREE.MathUtils.lerp(POP_SPEED[0], POP_SPEED[1], power) * this.feel.pop;
     this.vx += n.x * pop;
     this.vy += n.y * pop;
     this.vz += n.z * pop;
-    this.takeOff(-turn * THREE.MathUtils.lerp(SPIN_THROW[0], SPIN_THROW[1], power));
+    this.takeOff(-turn * THREE.MathUtils.lerp(SPIN_THROW[0], SPIN_THROW[1], power) * this.feel.spin);
     this.events.push({ type: 'jump', power });
   }
 
@@ -310,10 +320,11 @@ export class SnowboardMotor {
     const impact = this.hitSnow(sample.normal);
     const fast = Math.hypot(this.vx, this.vz) > CATCH_SPEED;
     const skew = this.alignBoard();
-    const slammed = impact > HARD_LANDING || (skew > LANDING_SKEW.catch && fast);
+    const tolerance = this.feel.landing;
+    const slammed = impact > HARD_LANDING || (skew > tolerance.catch && fast);
     if (slammed) this.slam();
     if (this.airTime > 0.45) {
-      const clean = !slammed && skew < LANDING_SKEW.clean;
+      const clean = !slammed && skew < tolerance.clean;
       this.events.push({ type: 'land', spin: THREE.MathUtils.radToDeg(this.airSpin), air: this.airTime, clean, switch: this.switch });
     }
     // 每次板子拍回雪面都报一下，声音用
@@ -382,12 +393,16 @@ export class SnowboardMotor {
     // 正贴着树或墙：原地拧板只会在原地打转，这时交给滚落线把板头带开
     const pinned = Boolean(this.contact);
 
+    const feel = this.feel;
+    // 立刃立到了这种风格的几成
+    const edged = edgeAbs / feel.maxEdge;
+
     // 转向：沿板刃弧线走；抓地力不够时半径自动放大；很慢时允许原地拧板
     let yawRate = 0;
     if (edgeAbs > 0.03 && !down) {
-      const carve = speed / (SIDECUT / Math.sin(Math.min(edgeAbs, 1.4)));
-      const gripLimit = (surface.grip * G * Math.max(n.y, 0.2)) / Math.max(speed, 1.5);
-      const pivot = pinned ? 0 : (1 - smooth(1.5, 7, speed)) * 1.6 * (edgeAbs / MAX_EDGE);
+      const carve = speed / (feel.sidecut / Math.sin(Math.min(edgeAbs, 1.4)));
+      const gripLimit = (surface.grip * feel.grip * G * Math.max(n.y, 0.2)) / Math.max(speed, 1.5);
+      const pivot = pinned ? 0 : (1 - smooth(...feel.pivotFade, speed)) * feel.pivot * edged;
       yawRate = -Math.sign(this.edge) * Math.max(Math.min(carve, gripLimit), pivot);
     }
     this.yawRate = yawRate;
@@ -412,7 +427,7 @@ export class SnowboardMotor {
     across *= Math.exp(-bite * dt);
 
     const air = (input.tuck && !braking ? 0.0026 : 0.0042) * surface.drag * along * along;
-    let decel = 0.03 * G * Math.max(n.y, 0.2) * surface.drag + air + (edgeAbs / MAX_EDGE) * 0.5;
+    let decel = 0.03 * G * Math.max(n.y, 0.2) * surface.drag + air + edged * feel.edgeDrag;
     decel += SCRUB_DECEL * scrub;
     if (down) decel += 4;
     const loss = decel * dt;
@@ -420,9 +435,7 @@ export class SnowboardMotor {
     // 平地上按住 W 可以蹬板起步
     if (input.tuck && !braking && !down && along < 4.5) along += 3.2 * dt;
 
-    // 搓雪时板子横过来，只是姿态，不改行进方向；不刹车了，雪面的摩擦会把板子拧回行进方向
-    const skidTarget = braking && speed > 1.5 ? (this.edge < -0.05 ? -1 : 1) * 1.25 : 0;
-    this.skid += (skidTarget - this.skid) * (1 - Math.exp(-SKID_RATE * dt));
+    this.skid += (this.skidTarget(braking, down, speed) - this.skid) * (1 - Math.exp(-SKID_RATE * dt));
 
     vel.copy(forward).multiplyScalar(along).addScaledVector(right, across);
     this.x += vel.x * dt;
@@ -443,6 +456,20 @@ export class SnowboardMotor {
     this.vy = vel.y;
     this.vz = vel.z;
     this.onGround = true;
+  }
+
+  /**
+   * 板子该横过来多少（弧度，和 yaw 同向为正）。只是板头相对行进方向的偏角，不改行进方向：
+   * 刹车时整个横过来；搓雪转弯的风格里，转弯时板头比行进方向多拧进弯里一点；
+   * 都不是的话是 0，雪面的摩擦会把板子拧回行进方向。
+   */
+  skidTarget(braking, down, speed) {
+    if (down || speed <= 1.5) return 0;
+    if (braking) return (this.edge < -0.05 ? -1 : 1) * BRAKE_SKID;
+    const feel = this.feel;
+    if (!feel.steerSkid) return 0;
+    // edge 为正是向右转，对应 yaw 减小，所以板头拧进弯里是负的
+    return (-this.edge / feel.maxEdge) * feel.steerSkid * smooth(...feel.skidFade, speed);
   }
 
   /**

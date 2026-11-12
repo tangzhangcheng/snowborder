@@ -1,4 +1,5 @@
 import { PATTERNS, defaultStyle } from '../player/gear/createGear.js';
+import { TECHNIQUES } from '../player/techniques.js';
 
 const PATTERN_LABEL = {
   solid: '纯色',
@@ -11,6 +12,36 @@ const PATTERN_LABEL = {
 const STYLE_FIELDS = { top: 'color-top', base: 'color-base', accent: 'color-accent', binding: 'color-binding', pattern: 'pattern' };
 
 const $ = (id) => document.getElementById(id);
+
+/** 固定器角度写成“前 +15° 后 −15°”这样。 */
+function stanceText([front, back]) {
+  const signed = (deg) => `${deg < 0 ? '−' : '+'}${Math.abs(deg)}°`;
+  return `前 ${signed(front)} 后 ${signed(back)}`;
+}
+
+/**
+ * 装备面板里的滑行风格下拉框。onPick(id) 在玩家选了一种时调用。
+ * 返回 show(id)：别处换了风格（比如按 Q）时，让下拉框和底下的说明跟上。
+ */
+export function bindTechniquePicker(onPick) {
+  const picker = $('technique');
+  for (const [id, technique] of Object.entries(TECHNIQUES)) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = technique.label;
+    picker.append(opt);
+  }
+  picker.addEventListener('change', () => {
+    onPick(picker.value);
+    // 选完把焦点还回去，不然接下来的方向键会被下拉框吃掉
+    picker.blur();
+  });
+  return (id) => {
+    const technique = TECHNIQUES[id];
+    picker.value = id;
+    $('technique-note').textContent = `${stanceText(technique.stance)} · ${technique.note}`;
+  };
+}
 
 /** 装备面板：改板面配色与图案、换上衣颜色、导入导出定制。 */
 export function bindWorkshop(rider) {

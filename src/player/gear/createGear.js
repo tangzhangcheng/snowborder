@@ -12,8 +12,8 @@ const KICK = 1.1; // 板头翘起的弯度
 const BASE_Y = 0.016;
 /** 半站距（米）：两个固定器各离板心多远。 */
 export const STANCE = 0.27;
-/** 八字站位：前脚、后脚的固定器各朝外打开 15°。 */
-export const STANCE_ANGLES = [15, -15].map(THREE.MathUtils.degToRad);
+/** 没指定滑行风格时的固定器角度（度）：八字站位，前脚、后脚各朝外打开 15°。 */
+const DUCK_ANGLES = [15, -15];
 const TEX_W = 128;
 const TEX_H = 512;
 
@@ -114,15 +114,17 @@ function deckGeometry(thickness, y, grow) {
   return geo;
 }
 
-export function createSnowboard(style) {
+/** angles 是固定器角度（度）：[前脚, 后脚]，正数朝板头。 */
+export function createSnowboard(style, angles = DUCK_ANGLES) {
   const group = new THREE.Group();
   group.name = 'Snowboard';
   const top = new THREE.MeshToonMaterial({ map: patternTexture(style), color: '#ffffff' });
   const deck = new THREE.Mesh(deckGeometry(THICKNESS, BASE_Y, 0), [top, toonMat(style.base)]);
   const base = addOutline(new THREE.Mesh(deckGeometry(BASE_Y, 0, 0.004), toonMat(style.base)));
   group.add(deck, base);
-  group.add(createBinding(style, STANCE, STANCE_ANGLES[0]));
-  group.add(createBinding(style, -STANCE, STANCE_ANGLES[1]));
+  const [front, back] = angles.map(THREE.MathUtils.degToRad);
+  group.add(createBinding(style, STANCE, front));
+  group.add(createBinding(style, -STANCE, back));
   return group;
 }
 
@@ -146,6 +148,6 @@ export function createBinding(style, z, yaw) {
   return pivot;
 }
 
-export function createGear(style) {
-  return createSnowboard(style);
+export function createGear(style, angles) {
+  return createSnowboard(style, angles);
 }

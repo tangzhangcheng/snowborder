@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { STANCE, STANCE_ANGLES, createGear, defaultStyle } from './gear/createGear.js';
+import { STANCE, createGear, defaultStyle } from './gear/createGear.js';
 import { RIG, buildRiderModel } from './riderModel.js';
-import { ridePose } from './ridePose.js';
-import { MAX_CHARGE, MAX_EDGE } from './SnowboardMotor.js';
+import { poseSet, ridePose } from './ridePose.js';
+import { MAX_CHARGE } from './SnowboardMotor.js';
+import { DEFAULT_TECHNIQUE, TECHNIQUES } from './techniques.js';
 
 const { thigh: THIGH, shin: SHIN, upperArm: UPPER_ARM, forearm: FOREARM, hipHalf: HIP_HALF, ankle: ANKLE, shoulder: SHOULDER } = RIG;
 const BOARD_TOP = 0.05;
@@ -13,8 +14,6 @@ const STORE_KEY = 'hemu-like-gear';
 /** 板面滚转角相对立刃量的比例：慢速 / 高速。 */
 const LEAN_SLOW = 0.4;
 const LEAN_FAST = 1;
-/** 板面最多滚转到多少弧度；身体折叠多深就看滚转到了它的几成。 */
-const MAX_ROLL = MAX_EDGE * LEAN_FAST;
 const SKID_ANGLE = 1.25; // 搓雪时板子横过来的角度，和 SnowboardMotor 一致
 const SKID_EDGE = 0.7;
 /** 各个姿态分量跟上目标的快慢（每秒）。数字越大动作越脆。 */
@@ -46,7 +45,9 @@ const NOSE_BEARING = Math.PI / 2;
 const DRIFT_SPEED = 2;
 /** 落地时垂直雪面的速度到这么大（米/秒），缓冲就蹲到底。 */
 const ABSORB_FULL_SPEED = 7;
-/** 板面滚转到前者（占最大滚转的比例）时手开始去够雪面，到后者摸到。 */
+/** 板面滚转到这么多弧度，人倒得够低，手才摸得到雪。和滑行风格无关：立刃浅的风格压到底也够不着。 */
+const TOUCH_ROLL = 1.1;
+/** 板面滚转到前者（占 TOUCH_ROLL 的比例）时手开始去够雪面，到后者摸到。 */
 const TOUCH_BANK = [0.55, 0.95];
 /** 摸雪的那只手沿板长方向比肩膀再往外探多远（米）：前刃是后手拖在身后，后刃是前手撑在身前。 */
 const TOUCH_REACH = { toe: 0.18, heel: 0.14 };
@@ -58,7 +59,7 @@ function smoothstep(x) {
   return t * t * (3 - 2 * t);
 }
 
-/** 朝这一侧滚转了 bank（占最大滚转的比例）时，手够向雪面几成。 */
+/** 朝这一侧滚转了 bank（占 TOUCH_ROLL 的比例）时，手够向雪面几成。 */
 function touchAmount(bank) {
   return smoothstep((bank - TOUCH_BANK[0]) / (TOUCH_BANK[1] - TOUCH_BANK[0]));
 }
@@ -98,6 +99,8 @@ export class Rider {
     this.board = null;
     this.edge = 0;
     this.roll = 0;
+    // 板面最多滚转到多少弧度；身体折叠多深就看滚转到了它的几成
+    this.maxRoll = 1;
     // 姿态分量，都是 0–1：收腿加速、蓄力、滑行屈膝、腾空、空中收腿、落地冲击和跟着它的下蹲
     this.tuck = 0;
     this.charge = 0;
@@ -121,7 +124,7 @@ export class Rider {
     this.fall = 0;
     this.stride = 0;
     this.up = new THREE.Vector3(0, 1, 0);
-    this.mountGear();
+    this.setTechnique(TECHNIQUES[DEFAULT_TECHNIQUE]);
   }
 
   mountGear() {
@@ -129,8 +132,16 @@ export class Rider {
       this.board.removeFromParent();
       this.board.traverse((o) => o.geometry?.dispose?.());
     }
-    this.board = createGear(this.style);
+    this.board = createGear(this.style, this.technique.stance);
     this.root.add(this.board);
+  }
+
+  /** 换一种滑行风格（TECHNIQUES 里的一项）：固定器拧到这种风格的角度，身体换成这种风格的摆法。 */
+  setTechnique(technique) {
+    this.technique = technique;
+    this.poses = poseSet(technique.pose);
+    this.footAngles = technique.stance.map(THREE.MathUtils.degToRad);
+    this.mountGear();
   }
 
   setStyle(style) {
@@ -169,6 +180,7 @@ export class Rider {
     const grounded = riding && motor.onGround;
     const flying = riding && !motor.onGround;
     this.switched = riding && motor.switch;
+    this.maxRoll = motor.maxEdge * LEAN_FAST;
     // 横板搓雪时压的是靠山一侧的板刃，和转弯输入无关
     const skid = Math.min(1, Math.abs(motor.skid) / SKID_ANGLE);
     const edge = lerp(motor.edge, -Math.sign(motor.skid) * SKID_EDGE, skid);
@@ -218,13 +230,15 @@ export class Rider {
   trackTwist(motor, grounded, flying, dt) {
     const { clamp, damp } = THREE.MathUtils;
     // 转向输入：正是向右，对应 yaw 减小，所以和拧转的正方向相反
-    const turn = motor.edge / MAX_EDGE;
+    const turn = motor.edge / motor.maxEdge;
     let wind = 0;
     if (grounded && motor.popPower > 0) wind = -turn * WIND.throw;
     else if (grounded) wind = turn * WIND.prep * this.charge;
     else if (flying) wind = clamp(motor.spinRate * WIND.lead, -WIND.leadMax, WIND.leadMax);
-    // 板子在空中拧开、或落地时还没正过来：上身朝反方向拧，头不跟着板子走
-    const loose = motor.mode === 'ride' ? motor.skid * this.air : 0;
+    // 板子在空中拧开、或落地时还没正过来：上身朝反方向拧，头不跟着板子走。
+    // 搓雪小转这类风格在雪上也一样：下身带着板子拧，上身留在原来的朝向
+    const held = Math.max(this.air, this.technique.pose.quiet);
+    const loose = motor.mode === 'ride' ? motor.skid * held : 0;
     this.wind = damp(this.wind, wind - loose * WIND.counter, RATE.wind, dt);
     const lead = flying ? clamp(motor.spinRate * SPOT.lead, -SPOT.max, SPOT.max) : 0;
     this.gaze = damp(this.gaze, this.travelBearing(motor, flying) + lead, RATE.spot, dt);
@@ -291,7 +305,7 @@ export class Rider {
   /** 两只脚踩在板上的位置和朝向（身体坐标）。板头翘起来时前脚跟着抬高，前膝自然就提起来了。 */
   feetOnBoard() {
     const rise = Math.sin(this.ollie);
-    return STANCE_ANGLES.map((yaw, i) => {
+    return this.footAngles.map((yaw, i) => {
       const x = i === 0 ? STANCE : -STANCE;
       return { pos: new THREE.Vector3(x, BOARD_TOP + (x + TAIL_PIVOT) * rise, 0), yaw, pitch: this.ollie };
     });
@@ -299,9 +313,10 @@ export class Rider {
 
   /** 板上的姿态：基础站姿加上压刃、蹲、腾空这些动作各做到几成，具体怎么摆在 ridePose 里。 */
   poseRide() {
-    // 板面滚转到了几成，朝前刃为正。慢速时滚得浅，人也就折得浅
-    const bank = this.roll / MAX_ROLL;
-    const touch = { toe: touchAmount(bank), heel: touchAmount(-bank) };
+    // 板面滚转到了这种风格的几成，朝前刃为正。慢速时滚得浅，人也就折得浅
+    const bank = this.roll / this.maxRoll;
+    const reach = this.technique.pose.touch;
+    const touch = { toe: touchAmount(this.roll / TOUCH_ROLL) * reach, heel: touchAmount(-this.roll / TOUCH_ROLL) * reach };
     const pose = ridePose({
       cruise: this.cruise,
       toe: bank,
@@ -315,7 +330,7 @@ export class Rider {
       fly: this.air,
       fold: this.fold,
       spinTuck: this.spinTuck,
-    });
+    }, this.poses);
     const { clamp } = THREE.MathUtils;
     const twist = clamp(pose.twist + this.wind, -WIND.limit, WIND.limit);
     // 头朝行进方向看，但不用拧到正对：站姿里看板头时差多少没拧到，这里也留这么多
@@ -327,7 +342,7 @@ export class Rider {
     this.setTorso(pose.hipY, pose.hipZ, pose.pitch, twist);
     this.setHead(clamp(look - twist, -SPOT.neck, SPOT.neck), pose.pitch * HEAD_LEVEL.pitch + this.roll * HEAD_LEVEL.roll);
 
-    this.setLimbs(pose.hipY, pose.hipZ, this.feetOnBoard(), this.placeHands(pose, touch), pose.knees);
+    this.setLimbs(pose.hipY, pose.hipZ, this.feetOnBoard(), this.placeHands(pose, touch), pose.knees, pose.drive);
   }
 
   /**
@@ -412,8 +427,11 @@ export class Rider {
     this.head.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(SIDEWAYS, -level));
   }
 
-  /** knees：膝盖往外打开的程度，八字站位时膝盖跟着脚尖朝外。 */
-  setLimbs(hipY, hipZ, feet, hands, knees = 0.3) {
+  /**
+   * knees：膝盖往外打开的程度，八字站位时膝盖跟着脚尖朝外。
+   * drive：两个膝盖一起往板头方向顶的程度，一顺站位时膝盖跟着脚尖朝前。
+   */
+  setLimbs(hipY, hipZ, feet, hands, knees = 0.3, drive = 0) {
     const joint = new THREE.Vector3();
     const end = new THREE.Vector3();
     this.legs.forEach((leg, i) => {
@@ -423,7 +441,7 @@ export class Rider {
       leg.boot.rotation.set(0, foot.yaw, foot.pitch ?? 0, 'ZYX');
       const hip = new THREE.Vector3(leg.side * HIP_HALF, hipY - 0.04, hipZ);
       const ankle = new THREE.Vector3(foot.pos.x, foot.pos.y + ANKLE, foot.pos.z - 0.03);
-      solveJoint(hip, ankle, THIGH, SHIN, new THREE.Vector3(leg.side * knees, 0.1, 1), joint, end);
+      solveJoint(hip, ankle, THIGH, SHIN, new THREE.Vector3(leg.side * knees + drive, 0.1, 1), joint, end);
       stretch(leg.thigh, hip, joint);
       stretch(leg.shin, joint, end);
       leg.knee.position.copy(joint);

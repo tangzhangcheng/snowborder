@@ -5,6 +5,7 @@ import { DIFFICULTY, pisteTitle } from '../world/Pistes.js';
 import { Obstacles } from '../world/Obstacles.js';
 import { SnowboardMotor } from '../player/SnowboardMotor.js';
 import { Rider } from '../player/Rider.js';
+import { TECHNIQUES, loadTechnique, nextTechnique, saveTechnique } from '../player/techniques.js';
 import { SnowTrail } from '../trail/SnowTrail.js';
 import { BlobShadow, SnowSpray } from '../fx/RiderFx.js';
 import { Snowfall } from '../fx/Snowfall.js';
@@ -13,7 +14,7 @@ import { LiftSystem } from '../lift/LiftSystem.js';
 import { Vehicles } from '../vehicle/Vehicles.js';
 import { RideCamera } from '../camera/RideCamera.js';
 import { MapUI } from '../map/MapUI.js';
-import { bindWorkshop } from '../ui/workshop.js';
+import { bindTechniquePicker, bindWorkshop } from '../ui/workshop.js';
 
 const STEP = 1 / 120;
 const MAX_STEPS = 8;
@@ -149,6 +150,7 @@ export class Game {
       if (e.code === 'KeyR') this.rescue();
       if (e.code === 'KeyT') this.skipTime();
       if (e.code === 'KeyY') this.cycleWeather();
+      if (e.code === 'KeyQ') this.setTechnique(nextTechnique(this.technique));
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
@@ -174,6 +176,24 @@ export class Game {
       this.toggleDiorama(true);
     });
     bindWorkshop(this.rider);
+    this.showTechnique = bindTechniquePicker((id) => this.setTechnique(id));
+    this.setTechnique(loadTechnique(), false);
+  }
+
+  /**
+   * 换滑行风格：雪板的手感、固定器角度和身体的摆法一起换。
+   * announce 为 false 是开局时恢复上次的选择，不弹提示也不用再存一遍。
+   */
+  setTechnique(id, announce = true) {
+    const technique = TECHNIQUES[id];
+    this.technique = id;
+    this.motor.setFeel(technique.motor);
+    this.rider.setTechnique(technique);
+    this.showTechnique(id);
+    $('technique-name').textContent = technique.label;
+    if (!announce) return;
+    saveTechnique(id);
+    this.toast(technique.label);
   }
 
   /**

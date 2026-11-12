@@ -44,6 +44,7 @@
         <div class="card"><span>用时</span><b id="time">0:00</b><small>本趟</small></div>
         <div class="card"><span>海拔</span><b id="alt">0</b><small>m</small></div>
         <div class="card"><span>时刻</span><b id="clock">10:00</b><small id="weather">晴</small></div>
+        <div class="card"><span>风格 · 按 Q 换</span><b id="technique-name" class="words">八字刻滑</b></div>
       </div>
 
       <div id="minimap-wrap" title="打开地图 (M)">
@@ -61,6 +62,8 @@
         <h2>装备</h2>
         <button id="workshop-close" type="button" class="ghost" aria-label="关闭">×</button>
       </header>
+      <label>滑行风格<select id="technique"></select></label>
+      <p id="technique-note" class="note"></p>
       <label>图案<select id="pattern"></select></label>
       <label>板面<input id="color-top" type="color" /></label>
       <label>板底<input id="color-base" type="color" /></label>
@@ -89,6 +92,7 @@
         <li><kbd>A</kbd><kbd>D</kbd><span>压刃转弯</span></li>
         <li><kbd>W</kbd><span>收腿加速，平地蹬板</span></li>
         <li><kbd>S</kbd><span>横板搓雪减速</span></li>
+        <li><kbd>Q</kbd><span>换滑行风格：八字刻滑、一顺刻滑、搓雪小转、自由式</span></li>
         <li><kbd>空格</kbd><span>按住蓄力，松开起跳；压着 A / D 起跳带转体，空中按住收紧转得更快，松开张开减速</span></li>
         <li><kbd>E</kbd><span>乘索道、上下车</span></li>
         <li><kbd>M</kbd><span>地图，点一下设目的地</span></li>
